@@ -6,8 +6,6 @@ Sometimes you just need to know enough about a topic to have a real conversation
 
 Perplexity Sonar Deep Research is the closest thing I've found to **expertise in a single API call**: a cited 5,000-word brief in about two minutes, with every fact backed by an inline link you can verify with one click. Independent benchmarks put its citation accuracy at **94–98%** — the highest of the major deep-research tools.
 
-Why not the others? In my real-world use: **ChatGPT Deep Research** is second-most concise after Perplexity, but reads dry and accountant-style with citations grouped at the end (hard to verify any single claim). **Gemini Deep Research** has the broadest source roots, but its 20–30 page outputs read academic and verbose for everyday questions. **Claude Deep Research** is careful and good with long documents — and easily the slowest, 40+ minutes per query in my experience. Perplexity is the one that reads like a brief from a competent human analyst rather than a thesis or a corporate memo.
-
 This CLI gives you that experience at the command line, pay-per-call through OpenRouter (~$1 per broad-topic brief). No subscription. No rate limit. No login flow. One Python file, one runtime dependency.
 
 > Heads up — Perplexity Pro recently cut its Deep Research quota from unlimited to **20/month**. Calling Sonar Deep Research directly via OpenRouter, billed per call, is now both cheaper *and* more flexible for anyone running serious research.
