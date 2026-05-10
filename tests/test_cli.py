@@ -74,56 +74,106 @@ def test_returns_none_when_neither_present():
 
 
 # ---------------------------------------------------------------------------
-# TimeWindow + prompt + request body
+# parse_when — relative + absolute time specs
 # ---------------------------------------------------------------------------
 
 
-def test_build_prompt_days_contains_topic_and_dates():
-    window = cli.TimeWindow(
-        mode="days", days=30, from_date=date(2026, 4, 7), to_date=date(2026, 5, 7)
-    )
-    p = cli.build_prompt("Toronto real estate", window)
+@pytest.mark.parametrize("spec,expected_offset_days", [
+    ("7d", 7),
+    ("30d", 30),
+    ("4w", 28),
+    ("1m", 30),
+    ("3m", 90),
+    ("1y", 365),
+    ("2y", 730),
+    ("0d", 0),
+])
+def test_parse_when_relative(spec, expected_offset_days):
+    today = date(2026, 5, 10)
+    assert cli.parse_when(spec, today=today) == today - timedelta(days=expected_offset_days)
+
+
+def test_parse_when_iso_date():
+    assert cli.parse_when("2026-01-01") == date(2026, 1, 1)
+
+
+@pytest.mark.parametrize("spec", ["all", "none", "ALL", "  all  ", "None"])
+def test_parse_when_unbounded_sentinels(spec):
+    assert cli.parse_when(spec) is None
+
+
+@pytest.mark.parametrize("spec,expected", [
+    ("7D", date(2026, 5, 3)),           # uppercase unit
+    (" 7d ", date(2026, 5, 3)),         # surrounding whitespace
+    ("1Y", date(2025, 5, 10)),          # uppercase year
+])
+def test_parse_when_case_and_whitespace_tolerated(spec, expected):
+    """Case and surrounding whitespace are normalized; date is correct."""
+    assert cli.parse_when(spec, today=date(2026, 5, 10)) == expected
+
+
+# Failure cases — all should raise ValueError with the unified help text mentioned.
+# Internal whitespace ("3 m"), garbage strings, malformed dates, empty input.
+@pytest.mark.parametrize("spec", [
+    "",            # empty string
+    "bad",         # plain garbage
+    "7",           # number, no unit
+    "10z",         # bad unit
+    "abcd",        # not numeric
+    "2026-13-99",  # invalid ISO date (month 13, day 99)
+    "3 m",         # internal whitespace inside the token
+    "-7d",         # leading minus — regex \d+ doesn't accept
+])
+def test_parse_when_rejects_garbage(spec):
+    with pytest.raises(ValueError, match=r"Invalid time spec"):
+        cli.parse_when(spec)
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — branches on which bounds are set
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_closed_range_mentions_both_dates():
+    w = cli.TimeWindow(since=date(2026, 4, 7), until=date(2026, 5, 7))
+    p = cli.build_prompt("Toronto real estate", w)
     assert "Toronto real estate" in p
     assert "2026-04-07" in p
     assert "2026-05-07" in p
+    assert "between" in p
 
 
-@pytest.mark.parametrize("recency,phrase", [
-    ("day", "the past 24 hours"),
-    ("week", "the past week"),
-    ("month", "the past month"),
-    ("year", "the past year"),
-])
-def test_build_prompt_recency_uses_natural_phrase(recency, phrase):
-    p = cli.build_prompt("x", cli.TimeWindow(mode="recency", recency=recency))
-    assert phrase in p
-    # Recency-mode prompts should NOT contain ISO dates — they're not bounded by date.
-    assert "2026-" not in p
+def test_build_prompt_open_upper_bound_says_since():
+    w = cli.TimeWindow(since=date(2025, 1, 1), until=None)
+    p = cli.build_prompt("EU AI Act", w)
+    assert "since 2025-01-01" in p
+    assert "between" not in p
 
 
-def test_build_prompt_all_time_has_no_date_prose():
-    p = cli.build_prompt("differential privacy", cli.TimeWindow(mode="all_time"))
+def test_build_prompt_open_lower_bound_says_up_to():
+    w = cli.TimeWindow(since=None, until=date(2025, 12, 31))
+    p = cli.build_prompt("x", w)
+    assert "up to 2025-12-31" in p
+
+
+def test_build_prompt_unbounded_has_no_date_prose():
+    p = cli.build_prompt("differential privacy", cli.TimeWindow())
     assert "differential privacy" in p
     assert "between" not in p
-    assert "past" not in p
+    assert "since" not in p
+    assert "up to" not in p
     assert "2026-" not in p
 
 
-def test_build_request_body_recency_shape():
-    body = json.loads(cli.build_request_body(
-        "x", cli.TimeWindow(mode="recency", recency="month"), cli.DEFAULT_MODEL
-    ))
-    assert body["model"] == cli.DEFAULT_MODEL
-    assert body["messages"][0]["role"] == "user"
-    assert body["search_recency_filter"] == "month"
-    assert "search_after_date_filter" not in body
-    assert "search_before_date_filter" not in body
+# ---------------------------------------------------------------------------
+# build_request_body — emits only the date filters that are set
+# ---------------------------------------------------------------------------
 
 
-def test_build_request_body_days_shape():
+def test_build_request_body_closed_range_emits_both_filters():
     body = json.loads(cli.build_request_body(
         "x",
-        cli.TimeWindow(mode="days", days=30, from_date=date(2026, 4, 7), to_date=date(2026, 5, 7)),
+        cli.TimeWindow(since=date(2026, 4, 7), until=date(2026, 5, 7)),
         cli.DEFAULT_MODEL,
     ))
     # Perplexity wants %m/%d/%Y format, not ISO.
@@ -132,19 +182,31 @@ def test_build_request_body_days_shape():
     assert "search_recency_filter" not in body
 
 
-def test_build_request_body_all_time_shape():
+def test_build_request_body_open_upper_emits_only_after_filter():
     body = json.loads(cli.build_request_body(
-        "x", cli.TimeWindow(mode="all_time"), cli.DEFAULT_MODEL
+        "x", cli.TimeWindow(since=date(2025, 1, 1)), cli.DEFAULT_MODEL
     ))
+    assert body["search_after_date_filter"] == "01/01/2025"
+    assert "search_before_date_filter" not in body
+
+
+def test_build_request_body_open_lower_emits_only_before_filter():
+    body = json.loads(cli.build_request_body(
+        "x", cli.TimeWindow(until=date(2025, 12, 31)), cli.DEFAULT_MODEL
+    ))
+    assert "search_after_date_filter" not in body
+    assert body["search_before_date_filter"] == "12/31/2025"
+
+
+def test_build_request_body_unbounded_emits_no_filters():
+    body = json.loads(cli.build_request_body("x", cli.TimeWindow(), cli.DEFAULT_MODEL))
     assert "search_recency_filter" not in body
     assert "search_after_date_filter" not in body
     assert "search_before_date_filter" not in body
 
 
 def test_build_request_body_custom_model():
-    body = json.loads(cli.build_request_body(
-        "x", cli.TimeWindow(mode="recency", recency="month"), "perplexity/sonar-pro"
-    ))
+    body = json.loads(cli.build_request_body("x", cli.TimeWindow(), "perplexity/sonar-pro"))
     assert body["model"] == "perplexity/sonar-pro"
 
 
@@ -153,65 +215,86 @@ def test_build_request_body_custom_model():
 # ---------------------------------------------------------------------------
 
 
-def test_default_time_window_is_recency_month():
+def test_default_window_is_past_30_days():
     args = cli.parse_args(["topic"])
-    window = cli.resolve_time_window(args)
-    assert window.mode == "recency"
-    assert window.recency == cli.DEFAULT_RECENCY == "month"
+    today = date(2026, 5, 10)
+    w = cli.resolve_time_window(args, today=today)
+    assert w.since == today - timedelta(days=30)
+    assert w.until == today
 
 
-@pytest.mark.parametrize("recency", ["day", "week", "month", "year"])
-def test_recency_flag_sets_recency_mode(recency):
-    args = cli.parse_args(["topic", "--recency", recency])
-    window = cli.resolve_time_window(args)
-    assert window.mode == "recency"
-    assert window.recency == recency
+def test_since_all_makes_window_unbounded():
+    args = cli.parse_args(["topic", "--since", "all"])
+    w = cli.resolve_time_window(args, today=date(2026, 5, 10))
+    assert w.since is None
+    assert w.until is None
 
 
-def test_days_flag_sets_days_mode_and_computes_window():
-    args = cli.parse_args(["topic", "--days", "90"])
-    window = cli.resolve_time_window(args, today=date(2026, 5, 10))
-    assert window.mode == "days"
-    assert window.days == 90
-    assert window.to_date == date(2026, 5, 10)
-    assert window.from_date == date(2026, 5, 10) - timedelta(days=90)
+def test_since_relative_sets_lower_bound_only():
+    args = cli.parse_args(["topic", "--since", "7d"])
+    today = date(2026, 5, 10)
+    w = cli.resolve_time_window(args, today=today)
+    assert w.since == today - timedelta(days=7)
+    # No --until given → open upper bound (NOT auto-filled to today, because
+    # the user opted out of the default-bounded mode by passing --since).
+    assert w.until is None
 
 
-def test_all_time_flag_sets_all_time_mode():
-    args = cli.parse_args(["topic", "--all-time"])
-    window = cli.resolve_time_window(args)
-    assert window.mode == "all_time"
-    assert window.recency is None
-    assert window.from_date is None
+def test_until_only_sets_upper_bound_only():
+    args = cli.parse_args(["topic", "--until", "2025-12-31"])
+    w = cli.resolve_time_window(args, today=date(2026, 5, 10))
+    assert w.since is None
+    assert w.until == date(2025, 12, 31)
 
 
-@pytest.mark.parametrize("days", [1, 365])
-def test_days_boundary_values_accepted(days):
-    args = cli.parse_args(["topic", "--days", str(days)])
-    window = cli.resolve_time_window(args, today=date(2026, 5, 10))
-    assert window.mode == "days"
-    assert window.days == days
+def test_since_and_until_together():
+    args = cli.parse_args(["topic", "--since", "2025-01-01", "--until", "2025-12-31"])
+    w = cli.resolve_time_window(args, today=date(2026, 5, 10))
+    assert w.since == date(2025, 1, 1)
+    assert w.until == date(2025, 12, 31)
 
 
-@pytest.mark.parametrize("days", ["0", "-1", "366", "1000"])
-def test_days_out_of_range_rejected(days, capsys):
+@pytest.mark.parametrize("flag,value", [
+    ("--since", "bad"),
+    ("--since", "7"),       # missing unit
+    ("--since", "10z"),     # bad unit
+    ("--since", "2026-13-99"),  # invalid date
+    ("--until", "garbage"),
+])
+def test_parse_args_rejects_bad_time_spec(flag, value, capsys):
     with pytest.raises(SystemExit) as exc:
-        cli.parse_args(["topic", "--days", days])
+        cli.parse_args(["topic", flag, value])
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "--days must be between 1 and 365" in err
-    assert "--all-time" in err  # nudges user toward the right flag
+    assert flag in err  # error message names which flag was bad
+    assert "Invalid time spec" in err  # unified error message body
 
 
-@pytest.mark.parametrize("flags", [
-    ["--recency", "week", "--days", "30"],
-    ["--recency", "month", "--all-time"],
-    ["--days", "30", "--all-time"],
-])
-def test_time_flags_are_mutually_exclusive(flags):
+def test_parse_args_rejects_inverted_range(capsys):
+    """--since AFTER --until is a typo, not a valid window — fail loud at parse time."""
     with pytest.raises(SystemExit) as exc:
-        cli.parse_args(["topic", *flags])
-    assert exc.value.code == 2  # argparse error
+        cli.parse_args(["topic", "--since", "2026-12-31", "--until", "2026-01-01"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "is after" in err
+    # Helpful suggestion: shows the user what swapped order would look like.
+    assert "Use --since 2026-01-01 --until 2026-12-31" in err
+
+
+def test_parse_args_rejects_inverted_relative_range(capsys):
+    """--since 7d --until 30d is inverted (since=today-7, until=today-30); reject."""
+    with pytest.raises(SystemExit) as exc:
+        cli.parse_args(["topic", "--since", "7d", "--until", "30d"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "is after" in err
+
+
+@pytest.mark.parametrize("spec", ["100000d", "200y", "1500m"])
+def test_parse_when_rejects_excessive_offset(spec):
+    """Relative offsets beyond ~100 years (36,500 days) are garbage, not legitimate queries."""
+    with pytest.raises(ValueError, match=r"too large"):
+        cli.parse_when(spec, today=date(2026, 5, 10))
 
 
 # ---------------------------------------------------------------------------
@@ -278,16 +361,14 @@ def test_parse_response_missing_annotations():
 # ---------------------------------------------------------------------------
 
 
-def test_render_markdown_days_includes_all_sections():
+def test_render_markdown_closed_range_includes_all_sections():
     result = cli.SynthesisResult(
         synthesis="Body.",
         citations=[cli.Citation(url="https://a.example", title="A")],
         usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         model="perplexity/sonar-deep-research",
     )
-    window = cli.TimeWindow(
-        mode="days", days=30, from_date=date(2026, 4, 7), to_date=date(2026, 5, 7)
-    )
+    window = cli.TimeWindow(since=date(2026, 4, 7), until=date(2026, 5, 7))
     md = cli.render_markdown(
         result, "x", window, 12.3, 200, run_time=datetime(2026, 5, 7, 22, 30),
     )
@@ -299,25 +380,23 @@ def test_render_markdown_days_includes_all_sections():
     assert "2026-04-07 to 2026-05-07" in md
 
 
-def test_render_markdown_recency_shows_recency_phrase():
-    window = cli.TimeWindow(mode="recency", recency="year")
+def test_render_markdown_open_upper_says_since():
     md = cli.render_markdown(
         cli.SynthesisResult(synthesis="x", citations=[]),
-        "topic", window, 1.0, 200,
+        "topic", cli.TimeWindow(since=date(2025, 1, 1)), 1.0, 200,
     )
-    assert "past year" in md
-    assert "search_recency_filter" in md  # the metadata line surfaces the API param
+    assert "since 2025-01-01" in md
+    assert "no upper bound" in md
 
 
-def test_render_markdown_all_time_shows_unbounded():
+def test_render_markdown_unbounded_shows_cold_start():
     md = cli.render_markdown(
         cli.SynthesisResult(synthesis="x", citations=[]),
-        "topic", cli.TimeWindow(mode="all_time"), 1.0, 200,
+        "topic", cli.TimeWindow(), 1.0, 200,
         run_time=datetime(2026, 5, 10, 14, 51),
     )
-    # Window line says unbounded, not a date range.
     assert "**Window:** unbounded" in md
-    # No date-window framing should leak (the **Run:** timestamp is fine and expected).
+    assert "cold-start" in md
     assert "to 2026-" not in md
     assert "between 2026-" not in md
 
@@ -325,7 +404,7 @@ def test_render_markdown_all_time_shows_unbounded():
 def test_render_markdown_empty_citations_renders_sentinel():
     md = cli.render_markdown(
         cli.SynthesisResult(synthesis="hi", citations=[]),
-        "x", cli.TimeWindow(mode="recency", recency="month"), 1.0, 200,
+        "x", cli.TimeWindow(since=date(2026, 4, 7), until=date(2026, 5, 7)), 1.0, 200,
     )
     assert "_(none)_" in md
 
@@ -333,7 +412,7 @@ def test_render_markdown_empty_citations_renders_sentinel():
 def test_render_markdown_empty_synthesis_renders_sentinel():
     md = cli.render_markdown(
         cli.SynthesisResult(synthesis="", citations=[]),
-        "x", cli.TimeWindow(mode="recency", recency="month"), 1.0, 200,
+        "x", cli.TimeWindow(since=date(2026, 4, 7), until=date(2026, 5, 7)), 1.0, 200,
     )
     assert "_(empty)_" in md
 
@@ -393,6 +472,58 @@ def test_main_writes_md_and_json_and_exit_0(tmp_path):
     md = out_md.read_text(encoding="utf-8")
     assert "Synthesis." in md
     assert "[A](https://a.example)" in md
+
+
+def test_main_since_flag_propagates_to_request_body(tmp_path):
+    """End-to-end: --since 7d makes it from argparse all the way into the API request.
+
+    Without this test, the plumbing (argparse → resolve_time_window → build_request_body)
+    is only unit-tested in pieces. This test pins the integration.
+    """
+    canned = {"model": "m", "choices": [{"message": {"content": "ok"}}], "usage": {}}
+    out_md = tmp_path / "out.md"
+    captured_body = {}
+
+    def fake_call(body, api_key, **kwargs):
+        captured_body["bytes"] = body
+        return (200, canned)
+
+    with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"}, clear=True):
+        with mock.patch.object(cli, "call_openrouter", side_effect=fake_call):
+            rc = cli.main(["x", "--since", "7d", "-o", str(out_md)])
+
+    assert rc == 0
+    body = json.loads(captured_body["bytes"])
+    # --since 7d should set the after-date filter, leave before-date open.
+    assert "search_after_date_filter" in body
+    assert "search_before_date_filter" not in body
+    # The rendered markdown should reflect the open upper bound.
+    md = out_md.read_text(encoding="utf-8")
+    assert "no upper bound" in md
+
+
+def test_main_all_time_flag_propagates_to_request_body(tmp_path):
+    """End-to-end: --since all produces a request with no date filters at all."""
+    canned = {"model": "m", "choices": [{"message": {"content": "ok"}}], "usage": {}}
+    out_md = tmp_path / "out.md"
+    captured_body = {}
+
+    def fake_call(body, api_key, **kwargs):
+        captured_body["bytes"] = body
+        return (200, canned)
+
+    with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake"}, clear=True):
+        with mock.patch.object(cli, "call_openrouter", side_effect=fake_call):
+            rc = cli.main(["x", "--since", "all", "-o", str(out_md)])
+
+    assert rc == 0
+    body = json.loads(captured_body["bytes"])
+    assert "search_after_date_filter" not in body
+    assert "search_before_date_filter" not in body
+    assert "search_recency_filter" not in body
+    md = out_md.read_text(encoding="utf-8")
+    assert "unbounded" in md
+    assert "cold-start" in md
 
 
 def test_main_no_json_skips_raw_file(tmp_path):

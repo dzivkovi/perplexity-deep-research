@@ -32,6 +32,9 @@ env/
 *.swo
 *~
 
+# Claude Code per-machine settings (per-user preferences, not for sharing)
+.claude/
+
 # Test / dev caches
 .pytest_cache/
 .deepeval/

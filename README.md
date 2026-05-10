@@ -15,9 +15,9 @@ This CLI gives you that experience at the command line, pay-per-call through Ope
 ## A real run
 
 ```text
-$ perplexity-deep-research "Toronto resale condos" --recency year
+$ perplexity-deep-research "Toronto resale condos" --since 1y
 [pdr] Firing perplexity/sonar-deep-research for 'Toronto resale condos'...
-[pdr] Window: past year (search_recency_filter='year')
+[pdr] Window: since 2025-05-10 (no upper bound)
 [pdr] HTTP 200 in 148.1s
 [pdr] Raw JSON saved to perplexity-deep-research-toronto-resale-condos-2026-05-10-1452.json
 [pdr] Markdown summary saved to perplexity-deep-research-toronto-resale-condos-2026-05-10-1452.md
@@ -134,26 +134,57 @@ The included `.env.example` is the canonical template — single line, no surpri
 
 If a shell env var is already set, it wins — `.env` cannot override it (`override=False`). That keeps CI / production env vars authoritative even when a stray `.env` ends up in the working dir.
 
-## Time-mode guide — pick the right window for your topic
+## Two ways to use it
 
-Perplexity's API has three ways to constrain the search corpus, and this CLI exposes all three. Picking the right one matters: the wrong window can make a cold-start topic produce dated nonsense or a news topic miss recent events.
+There are really only two modes worth knowing about. Pick based on what you're trying to learn.
 
-| Topic type | Recommended flag | Why |
-| --- | --- | --- |
-| News, market data, regulatory updates, sports | `--recency week` or `--recency month` | Fast-moving — you want the last few weeks. Default is `--recency month`. |
-| Slow-moving trends (real estate, industry shifts) | `--recency year` or `--days 365` | One year captures full cycles without bringing in stale context. |
-| Custom historical window (e.g. "since the election") | `--days N` (1–365) | Computes a precise from/to date pair. |
-| Cold-start / evergreen topics ("What is X?", concept primers) | `--all-time` | No filter — let Perplexity find the best sources regardless of date. Anything else will produce "what happened with X recently" framing. |
+### 1. **Recency search** — "what's new about X?" *(default)*
 
-**The flags are mutually exclusive.** Pick one.
+You're trying to keep up with something that changes: news, markets, a regulation, a sport, a company. The default with no flags gives you the **past 30 days**, which is the right answer for most "what changed?" questions:
 
-Under the hood: `--recency` maps to Perplexity's `search_recency_filter`, `--days N` maps to `search_after_date_filter` + `search_before_date_filter`, and `--all-time` sends neither — meaning Perplexity searches its full index. See [Perplexity's date filter docs](https://docs.perplexity.ai/docs/sonar/filters) for the underlying API.
+```bash
+perplexity-deep-research "Toronto resale condos"      # past 30 days
+perplexity-deep-research "GLP-1 weight loss drugs"    # past 30 days
+perplexity-deep-research "Mark Carney AI policy"      # past 30 days
+```
+
+Want a different window? Use `--since`:
+
+```bash
+perplexity-deep-research "Q2 earnings season" --since 7d
+perplexity-deep-research "Toronto resale condos" --since 1y       # past year
+perplexity-deep-research "EU AI Act enforcement" --since 2024-09-01
+```
+
+`--since` accepts relative offsets (`7d`, `4w`, `3m`, `1y`) or ISO dates (`2025-04-01`). Use `--until` to bound the upper side too:
+
+```bash
+perplexity-deep-research "Mark Carney AI policy" --since 2025-04-01 --until 2026-04-30
+```
+
+### 2. **Cold-start research** — "what is X, and why should I care?"
+
+You know *nothing* about the topic. You're not asking what changed — you're asking what *is*. You want canonical sources, foundational papers, the project's own docs — the stuff that's been true for years, not 30 days. Use `--since all`:
+
+```bash
+perplexity-deep-research "What is differential privacy?" --since all
+perplexity-deep-research "Canadian Sovereign AI Compute Strategy" --since all
+perplexity-deep-research "history of Rust async runtimes" --since all
+```
+
+Without `--since all`, the default 30-day window would force the model into "what happened with differential privacy *recently?*" framing — which is exactly wrong for a primer. The unbounded mode lets Perplexity find the best sources regardless of when they were written.
+
+### How the two modes get to the API
+
+Under the hood, `--since`/`--until` map to Perplexity's [official date filter parameters](https://docs.perplexity.ai/docs/sonar/filters) — `search_after_date_filter` and `search_before_date_filter`. These actually constrain which web pages Perplexity searches; they're not just hints to the model.
+
+`--since all` (used alone, no `--until`) sends *neither* filter — Perplexity searches its full index. If you combine `--since all --until 2025-12-31`, the upper bound is still applied; only the lower bound is dropped.
 
 ## CLI reference
 
 ```text
 perplexity-deep-research [-h] [-V] [-o OUTPUT]
-                         [--recency {day,week,month,year} | --days N | --all-time]
+                         [--since VALUE] [--until VALUE]
                          [--model M] [--env-file PATH] [--timeout S]
                          [--dry-run] [--no-json] [--quiet] topic
 ```
@@ -162,9 +193,8 @@ perplexity-deep-research [-h] [-V] [-o OUTPUT]
 | --- | --- | --- |
 | `topic` (positional) | — | Text to research, e.g. `"Toronto resale condos"` |
 | `-o`, `--output` | auto-named | Output markdown path |
-| `--recency` | `month` (when no time flag set) | One of `day` / `week` / `month` / `year`. Maps to `search_recency_filter`. |
-| `--days N` | unset | Custom window 1–365 days. Maps to `search_after/before_date_filter`. |
-| `--all-time` | off | No time filter — for evergreen topics. |
+| `--since` | none — default window is past 30 days **only** when both `--since` and `--until` are omitted | Lower bound. ISO date (`2026-01-01`), relative (`7d`/`4w`/`3m`/`1y`), or `all` for cold-start. |
+| `--until` | today **only** when both bounds are omitted; otherwise omitting `--until` means open upper bound | Upper bound. Same formats as `--since`. |
 | `--model` | `perplexity/sonar-deep-research` | Any OpenRouter chat-completions model id |
 | `--env-file` | `.env` (cwd, walks up) | Where to look for `OPENROUTER_API_KEY` |
 | `--timeout` | `600` | Socket-recv timeout in seconds |
@@ -175,13 +205,13 @@ perplexity-deep-research [-h] [-V] [-o OUTPUT]
 
 ### `--dry-run` is your friend before you spend
 
-Before firing the first paid call on a new topic, run with `--dry-run` to confirm the prompt, the time-window mode, and the auto-generated filename look right:
+Before firing the first paid call on a new topic, run with `--dry-run` to confirm the prompt, the time window, and the auto-generated filename look right:
 
 ```bash
-perplexity-deep-research "Q2 earnings season" --recency week --dry-run
+perplexity-deep-research "Q2 earnings season" --since 7d --dry-run
 ```
 
-It prints the exact JSON body that *would* be sent to OpenRouter — including the `search_recency_filter` (or date filters), the model id, and the path it would write to. No tokens spent.
+It prints the exact JSON body that *would* be sent to OpenRouter — including the date filters, the model id, and the path it would write to. No tokens spent.
 
 ## Why does it call Perplexity through OpenRouter?
 
