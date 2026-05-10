@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=45", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "perplexity-deep-research"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Single-shot Perplexity Deep Research CLI via OpenRouter — research any topic, save citations to markdown"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -55,3 +55,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.setuptools_scm]
+# Version derived from git tags (e.g., v0.2.0 → 0.2.0). Single source of truth.
+# Between tags: PEP 440 dev marker auto-appended (e.g., 0.2.1.dev3).
+# no-local-version drops the +g{hash} segment so PyPI uploads work without manual mangling.
+local_scheme = "no-local-version"

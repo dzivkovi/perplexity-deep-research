@@ -5,7 +5,7 @@ import io
 import json
 import os
 import urllib.error
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -74,33 +74,144 @@ def test_returns_none_when_neither_present():
 
 
 # ---------------------------------------------------------------------------
-# Prompt + request body
+# TimeWindow + prompt + request body
 # ---------------------------------------------------------------------------
 
 
-def test_build_prompt_contains_topic_and_dates():
-    p = cli.build_prompt("Toronto real estate", date(2026, 4, 7), date(2026, 5, 7))
+def test_build_prompt_days_contains_topic_and_dates():
+    window = cli.TimeWindow(
+        mode="days", days=30, from_date=date(2026, 4, 7), to_date=date(2026, 5, 7)
+    )
+    p = cli.build_prompt("Toronto real estate", window)
     assert "Toronto real estate" in p
     assert "2026-04-07" in p
     assert "2026-05-07" in p
 
 
-def test_build_request_body_shape():
-    body = cli.build_request_body(
-        "x", date(2026, 4, 7), date(2026, 5, 7), cli.DEFAULT_MODEL
-    )
-    decoded = json.loads(body)
-    assert decoded["model"] == cli.DEFAULT_MODEL
-    assert len(decoded["messages"]) == 1
-    assert decoded["messages"][0]["role"] == "user"
-    assert "x" in decoded["messages"][0]["content"]
+@pytest.mark.parametrize("recency,phrase", [
+    ("day", "the past 24 hours"),
+    ("week", "the past week"),
+    ("month", "the past month"),
+    ("year", "the past year"),
+])
+def test_build_prompt_recency_uses_natural_phrase(recency, phrase):
+    p = cli.build_prompt("x", cli.TimeWindow(mode="recency", recency=recency))
+    assert phrase in p
+    # Recency-mode prompts should NOT contain ISO dates — they're not bounded by date.
+    assert "2026-" not in p
+
+
+def test_build_prompt_all_time_has_no_date_prose():
+    p = cli.build_prompt("differential privacy", cli.TimeWindow(mode="all_time"))
+    assert "differential privacy" in p
+    assert "between" not in p
+    assert "past" not in p
+    assert "2026-" not in p
+
+
+def test_build_request_body_recency_shape():
+    body = json.loads(cli.build_request_body(
+        "x", cli.TimeWindow(mode="recency", recency="month"), cli.DEFAULT_MODEL
+    ))
+    assert body["model"] == cli.DEFAULT_MODEL
+    assert body["messages"][0]["role"] == "user"
+    assert body["search_recency_filter"] == "month"
+    assert "search_after_date_filter" not in body
+    assert "search_before_date_filter" not in body
+
+
+def test_build_request_body_days_shape():
+    body = json.loads(cli.build_request_body(
+        "x",
+        cli.TimeWindow(mode="days", days=30, from_date=date(2026, 4, 7), to_date=date(2026, 5, 7)),
+        cli.DEFAULT_MODEL,
+    ))
+    # Perplexity wants %m/%d/%Y format, not ISO.
+    assert body["search_after_date_filter"] == "04/07/2026"
+    assert body["search_before_date_filter"] == "05/07/2026"
+    assert "search_recency_filter" not in body
+
+
+def test_build_request_body_all_time_shape():
+    body = json.loads(cli.build_request_body(
+        "x", cli.TimeWindow(mode="all_time"), cli.DEFAULT_MODEL
+    ))
+    assert "search_recency_filter" not in body
+    assert "search_after_date_filter" not in body
+    assert "search_before_date_filter" not in body
 
 
 def test_build_request_body_custom_model():
-    body = cli.build_request_body(
-        "x", date(2026, 4, 7), date(2026, 5, 7), "perplexity/sonar-pro"
-    )
-    assert json.loads(body)["model"] == "perplexity/sonar-pro"
+    body = json.loads(cli.build_request_body(
+        "x", cli.TimeWindow(mode="recency", recency="month"), "perplexity/sonar-pro"
+    ))
+    assert body["model"] == "perplexity/sonar-pro"
+
+
+# ---------------------------------------------------------------------------
+# parse_args + resolve_time_window
+# ---------------------------------------------------------------------------
+
+
+def test_default_time_window_is_recency_month():
+    args = cli.parse_args(["topic"])
+    window = cli.resolve_time_window(args)
+    assert window.mode == "recency"
+    assert window.recency == cli.DEFAULT_RECENCY == "month"
+
+
+@pytest.mark.parametrize("recency", ["day", "week", "month", "year"])
+def test_recency_flag_sets_recency_mode(recency):
+    args = cli.parse_args(["topic", "--recency", recency])
+    window = cli.resolve_time_window(args)
+    assert window.mode == "recency"
+    assert window.recency == recency
+
+
+def test_days_flag_sets_days_mode_and_computes_window():
+    args = cli.parse_args(["topic", "--days", "90"])
+    window = cli.resolve_time_window(args, today=date(2026, 5, 10))
+    assert window.mode == "days"
+    assert window.days == 90
+    assert window.to_date == date(2026, 5, 10)
+    assert window.from_date == date(2026, 5, 10) - timedelta(days=90)
+
+
+def test_all_time_flag_sets_all_time_mode():
+    args = cli.parse_args(["topic", "--all-time"])
+    window = cli.resolve_time_window(args)
+    assert window.mode == "all_time"
+    assert window.recency is None
+    assert window.from_date is None
+
+
+@pytest.mark.parametrize("days", [1, 365])
+def test_days_boundary_values_accepted(days):
+    args = cli.parse_args(["topic", "--days", str(days)])
+    window = cli.resolve_time_window(args, today=date(2026, 5, 10))
+    assert window.mode == "days"
+    assert window.days == days
+
+
+@pytest.mark.parametrize("days", ["0", "-1", "366", "1000"])
+def test_days_out_of_range_rejected(days, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.parse_args(["topic", "--days", days])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--days must be between 1 and 365" in err
+    assert "--all-time" in err  # nudges user toward the right flag
+
+
+@pytest.mark.parametrize("flags", [
+    ["--recency", "week", "--days", "30"],
+    ["--recency", "month", "--all-time"],
+    ["--days", "30", "--all-time"],
+])
+def test_time_flags_are_mutually_exclusive(flags):
+    with pytest.raises(SystemExit) as exc:
+        cli.parse_args(["topic", *flags])
+    assert exc.value.code == 2  # argparse error
 
 
 # ---------------------------------------------------------------------------
@@ -167,28 +278,54 @@ def test_parse_response_missing_annotations():
 # ---------------------------------------------------------------------------
 
 
-def test_render_markdown_includes_all_sections():
+def test_render_markdown_days_includes_all_sections():
     result = cli.SynthesisResult(
         synthesis="Body.",
         citations=[cli.Citation(url="https://a.example", title="A")],
         usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         model="perplexity/sonar-deep-research",
     )
+    window = cli.TimeWindow(
+        mode="days", days=30, from_date=date(2026, 4, 7), to_date=date(2026, 5, 7)
+    )
     md = cli.render_markdown(
-        result, "x", date(2026, 4, 7), date(2026, 5, 7), 12.3, 200,
-        run_time=datetime(2026, 5, 7, 22, 30),
+        result, "x", window, 12.3, 200, run_time=datetime(2026, 5, 7, 22, 30),
     )
     assert "# Perplexity Deep Research — x" in md
     assert "Latency:** 12.3s" in md
     assert "HTTP status:** 200" in md
     assert "Body." in md
     assert "[A](https://a.example)" in md
+    assert "2026-04-07 to 2026-05-07" in md
+
+
+def test_render_markdown_recency_shows_recency_phrase():
+    window = cli.TimeWindow(mode="recency", recency="year")
+    md = cli.render_markdown(
+        cli.SynthesisResult(synthesis="x", citations=[]),
+        "topic", window, 1.0, 200,
+    )
+    assert "past year" in md
+    assert "search_recency_filter" in md  # the metadata line surfaces the API param
+
+
+def test_render_markdown_all_time_shows_unbounded():
+    md = cli.render_markdown(
+        cli.SynthesisResult(synthesis="x", citations=[]),
+        "topic", cli.TimeWindow(mode="all_time"), 1.0, 200,
+        run_time=datetime(2026, 5, 10, 14, 51),
+    )
+    # Window line says unbounded, not a date range.
+    assert "**Window:** unbounded" in md
+    # No date-window framing should leak (the **Run:** timestamp is fine and expected).
+    assert "to 2026-" not in md
+    assert "between 2026-" not in md
 
 
 def test_render_markdown_empty_citations_renders_sentinel():
     md = cli.render_markdown(
         cli.SynthesisResult(synthesis="hi", citations=[]),
-        "x", date(2026, 4, 7), date(2026, 5, 7), 1.0, 200,
+        "x", cli.TimeWindow(mode="recency", recency="month"), 1.0, 200,
     )
     assert "_(none)_" in md
 
@@ -196,7 +333,7 @@ def test_render_markdown_empty_citations_renders_sentinel():
 def test_render_markdown_empty_synthesis_renders_sentinel():
     md = cli.render_markdown(
         cli.SynthesisResult(synthesis="", citations=[]),
-        "x", date(2026, 4, 7), date(2026, 5, 7), 1.0, 200,
+        "x", cli.TimeWindow(mode="recency", recency="month"), 1.0, 200,
     )
     assert "_(empty)_" in md
 

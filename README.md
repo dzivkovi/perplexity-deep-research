@@ -15,18 +15,18 @@ This CLI gives you that experience at the command line, pay-per-call through Ope
 ## A real run
 
 ```text
-$ perplexity-deep-research "Toronto real estate"
-[pdr] Firing perplexity/sonar-deep-research for 'Toronto real estate'...
-[pdr] Window: 2026-04-10 to 2026-05-10
-[pdr] HTTP 200 in 112.5s
-[pdr] Raw JSON saved to perplexity-deep-research-toronto-real-estate-2026-05-10-1357.json
-[pdr] Markdown summary saved to perplexity-deep-research-toronto-real-estate-2026-05-10-1357.md
+$ perplexity-deep-research "Toronto resale condos" --recency year
+[pdr] Firing perplexity/sonar-deep-research for 'Toronto resale condos'...
+[pdr] Window: past year (search_recency_filter='year')
+[pdr] HTTP 200 in 148.1s
+[pdr] Raw JSON saved to perplexity-deep-research-toronto-resale-condos-2026-05-10-1452.json
+[pdr] Markdown summary saved to perplexity-deep-research-toronto-resale-condos-2026-05-10-1452.md
 {
   "model": "perplexity/sonar-deep-research",
-  "latency_s": 112.5,
-  "synthesis_chars": 32877,
-  "citation_count": 49,
-  "usage": { "total_tokens": 8116, "cost": 1.00204 }
+  "latency_s": 148.1,
+  "synthesis_chars": 44607,
+  "citation_count": 39,
+  "usage": { "total_tokens": 11075, "cost": 1.06834 }
 }
 ```
 
@@ -134,19 +134,37 @@ The included `.env.example` is the canonical template — single line, no surpri
 
 If a shell env var is already set, it wins — `.env` cannot override it (`override=False`). That keeps CI / production env vars authoritative even when a stray `.env` ends up in the working dir.
 
+## Time-mode guide — pick the right window for your topic
+
+Perplexity's API has three ways to constrain the search corpus, and this CLI exposes all three. Picking the right one matters: the wrong window can make a cold-start topic produce dated nonsense or a news topic miss recent events.
+
+| Topic type | Recommended flag | Why |
+| --- | --- | --- |
+| News, market data, regulatory updates, sports | `--recency week` or `--recency month` | Fast-moving — you want the last few weeks. Default is `--recency month`. |
+| Slow-moving trends (real estate, industry shifts) | `--recency year` or `--days 365` | One year captures full cycles without bringing in stale context. |
+| Custom historical window (e.g. "since the election") | `--days N` (1–365) | Computes a precise from/to date pair. |
+| Cold-start / evergreen topics ("What is X?", concept primers) | `--all-time` | No filter — let Perplexity find the best sources regardless of date. Anything else will produce "what happened with X recently" framing. |
+
+**The flags are mutually exclusive.** Pick one.
+
+Under the hood: `--recency` maps to Perplexity's `search_recency_filter`, `--days N` maps to `search_after_date_filter` + `search_before_date_filter`, and `--all-time` sends neither — meaning Perplexity searches its full index. See [Perplexity's date filter docs](https://docs.perplexity.ai/docs/sonar/filters) for the underlying API.
+
 ## CLI reference
 
 ```text
-perplexity-deep-research [-h] [-V] [-o OUTPUT] [--days N] [--model M]
-                         [--env-file PATH] [--timeout S] [--dry-run]
-                         [--no-json] [--quiet] topic
+perplexity-deep-research [-h] [-V] [-o OUTPUT]
+                         [--recency {day,week,month,year} | --days N | --all-time]
+                         [--model M] [--env-file PATH] [--timeout S]
+                         [--dry-run] [--no-json] [--quiet] topic
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `topic` (positional) | — | Text to research, e.g. `"Toronto real estate"` |
+| `topic` (positional) | — | Text to research, e.g. `"Toronto resale condos"` |
 | `-o`, `--output` | auto-named | Output markdown path |
-| `--days` | `30` | Research window in days (passed into prompt as a date range) |
+| `--recency` | `month` (when no time flag set) | One of `day` / `week` / `month` / `year`. Maps to `search_recency_filter`. |
+| `--days N` | unset | Custom window 1–365 days. Maps to `search_after/before_date_filter`. |
+| `--all-time` | off | No time filter — for evergreen topics. |
 | `--model` | `perplexity/sonar-deep-research` | Any OpenRouter chat-completions model id |
 | `--env-file` | `.env` (cwd, walks up) | Where to look for `OPENROUTER_API_KEY` |
 | `--timeout` | `600` | Socket-recv timeout in seconds |
@@ -157,13 +175,13 @@ perplexity-deep-research [-h] [-V] [-o OUTPUT] [--days N] [--model M]
 
 ### `--dry-run` is your friend before you spend
 
-Before firing the first paid call on a new topic, run with `--dry-run` to confirm the prompt and the auto-generated filename look right:
+Before firing the first paid call on a new topic, run with `--dry-run` to confirm the prompt, the time-window mode, and the auto-generated filename look right:
 
 ```bash
-perplexity-deep-research "Q2 earnings season" --dry-run
+perplexity-deep-research "Q2 earnings season" --recency week --dry-run
 ```
 
-It prints the exact JSON body that *would* be sent to OpenRouter — including the model id, the date range it baked into the prompt, and the path it would write to. No tokens spent.
+It prints the exact JSON body that *would* be sent to OpenRouter — including the `search_recency_filter` (or date filters), the model id, and the path it would write to. No tokens spent.
 
 ## Why does it call Perplexity through OpenRouter?
 
