@@ -1,28 +1,36 @@
 # perplexity-deep-research
 
-A one-shot CLI for Perplexity's **Sonar Deep Research** model via OpenRouter. Give it a topic, get back a multi-page cited research brief saved to markdown.
+## Why this exists
+
+Sometimes you just need to know enough about a topic to have a real conversation — a market, a drug, a regulation, a city's housing data, a paper everyone's quoting. Not write a thesis. Just *be useful in the room*.
+
+Perplexity Sonar Deep Research is the closest thing I've found to **expertise in a single API call**: a cited 5,000-word brief in about two minutes, with every fact backed by an inline link you can verify with one click. Independent benchmarks put its citation accuracy at **94–98%** — the highest of the major deep-research tools.
+
+This CLI gives you that experience at the command line, pay-per-call through OpenRouter (~$1 per broad-topic brief). No subscription. No rate limit. No login flow. One Python file, one runtime dependency.
+
+> Heads up — Perplexity Pro recently cut its Deep Research quota from unlimited to **20/month**. Calling Sonar Deep Research directly via OpenRouter, billed per call, is now both cheaper *and* more flexible for anyone running serious research.
+
+**If this saves you time, leaving a ⭐ helps others find it.**
+
+## A real run
 
 ```text
 $ perplexity-deep-research "Toronto real estate"
 [pdr] Firing perplexity/sonar-deep-research for 'Toronto real estate'...
-[pdr] Window: 2026-04-07 to 2026-05-07
-[pdr] Cost expectation: ~$0.30 to $0.90 per call
-[pdr] Latency expectation: 1-5+ minutes (Deep Research is slow by design)
-[pdr] HTTP 200 in 126.9s
-[pdr] Raw JSON saved to perplexity-deep-research-toronto-real-estate-2026-05-07-2222.json
-[pdr] Markdown summary saved to perplexity-deep-research-toronto-real-estate-2026-05-07-2222.md
+[pdr] Window: 2026-04-10 to 2026-05-10
+[pdr] HTTP 200 in 112.5s
+[pdr] Raw JSON saved to perplexity-deep-research-toronto-real-estate-2026-05-10-1357.json
+[pdr] Markdown summary saved to perplexity-deep-research-toronto-real-estate-2026-05-10-1357.md
 {
   "model": "perplexity/sonar-deep-research",
-  "latency_s": 126.9,
-  "synthesis_chars": 34215,
-  "citation_count": 41,
-  "usage": { "prompt_tokens": 37, "completion_tokens": 8918, "total_tokens": 8955 }
+  "latency_s": 112.5,
+  "synthesis_chars": 32877,
+  "citation_count": 49,
+  "usage": { "total_tokens": 8116, "cost": 1.00204 }
 }
 ```
 
-## What it does in one sentence
-
-Sends a single Sonar Deep Research request to OpenRouter for any topic you name, captures the synthesis (typically 5,000–10,000 words), deduplicates URL citations (typically 30–50 per query), and writes a readable markdown summary plus the raw JSON response to your current directory.
+A markdown file with the full synthesis (typically 5,000–10,000 words) plus a numbered list of all 30–50 citations — ready to read, forward, or convert to PDF/DOCX/HTML with pandoc.
 
 ## Quick start
 
@@ -199,6 +207,21 @@ The package has **one runtime dependency** — [python-dotenv](https://github.co
 ## How this came to be
 
 This CLI started as a one-off probe written to see what Sonar Deep Research actually returns when you give it a single broad query and let it run. The first call came back with a 6,800-word brief and 41 citations — clearly useful on its own, with no surrounding pipeline needed. So the probe got generalized into a standalone CLI: one topic in, one cited markdown brief out, no scaffolding required.
+
+## How it compares to ChatGPT, Gemini, and Claude Deep Research
+
+Now that you've used it, here's how Perplexity Sonar Deep Research sits next to the other deep-research tools — based on actually running each in real workflows, not a leaderboard:
+
+| Tool | Strength | Friction |
+| --- | --- | --- |
+| **ChatGPT Deep Research** | Deepest synthesis, longest reports — factually solid | Reads dry — strong on facts, light on the human angle; gated behind paid plans |
+| **Gemini Deep Research** | Widest source coverage (100+ pages); reads like a scholarly literature review | Dense, university-research voice — takes patience to get through |
+| **Claude Deep Research** (claude.ai) | Distinct angles — frequently surfaces what the other two miss | Slow: 30–40 minutes per query, easy to lose patience waiting |
+| **Perplexity Sonar Deep Research** | The most *readable* brief — fast (2–4 min), inline citations on every claim | Less synthesis-rich than the big three; not built for original analysis |
+
+**The honest take.** The highest-quality output comes from running the big three on the same question and synthesizing the answers via a Venn-diagram pass — convergence + unique insights + outliers. I wrote a [Multi-AI Research Synthesis prompt](https://github.com/dzivkovi/AI-assisted-SDLC-Project-scaffolding/blob/main/prompts/Multi-AI_Research_synthesis_prompt.md) for exactly that workflow. But that's the obsessive route — three subscriptions, an hour of waiting, and a synthesis pass.
+
+For everyone else — anyone in a rush, anyone who just needs to be useful in the room — Perplexity Sonar Deep Research is the right tool. It's not the deepest. It's the one where the 80/20 is good enough, the citations are inline, and the answer arrives in two minutes.
 
 ## Resources
 
