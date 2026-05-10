@@ -15,20 +15,22 @@ This CLI gives you that experience at the command line, pay-per-call through Ope
 ## A real run
 
 ```text
-$ perplexity-deep-research "Toronto resale condos" --since 1y
-[pdr] Firing perplexity/sonar-deep-research for 'Toronto resale condos'...
+$ perplexity-deep-research "Canadian Sovereign AI" --since 1y
+[pdr] Firing perplexity/sonar-deep-research for 'Canadian Sovereign AI'...
 [pdr] Window: since 2025-05-10 (no upper bound)
-[pdr] HTTP 200 in 148.1s
-[pdr] Raw JSON saved to perplexity-deep-research-toronto-resale-condos-2026-05-10-1452.json
-[pdr] Markdown summary saved to perplexity-deep-research-toronto-resale-condos-2026-05-10-1452.md
+[pdr] HTTP 200 in 128.9s
+[pdr] Raw JSON saved to perplexity-deep-research-canadian-sovereign-ai-2026-05-10-1803.json
+[pdr] Markdown summary saved to perplexity-deep-research-canadian-sovereign-ai-2026-05-10-1803.md
 {
   "model": "perplexity/sonar-deep-research",
-  "latency_s": 148.1,
-  "synthesis_chars": 44607,
-  "citation_count": 39,
-  "usage": { "total_tokens": 11075, "cost": 1.06834 }
+  "latency_s": 128.9,
+  "synthesis_chars": 43721,
+  "citation_count": 50,
+  "usage": { "total_tokens": 8926, "cost": 0.85539 }
 }
 ```
+
+Top citation sources from that run: `canada.ca` (4), `ised-isde.canada.ca` (4), NRC (2), BCE (2) — primary federal sources, exactly what you want for policy research.
 
 A markdown file with the full synthesis (typically 5,000–10,000 words) plus a numbered list of all 30–50 citations — ready to read, forward, or convert to PDF/DOCX/HTML with pandoc.
 
