@@ -264,9 +264,9 @@ Now that you've used it, here's how Perplexity Sonar Deep Research sits next to 
 
 | Tool | Strength | Friction |
 | --- | --- | --- |
-| **ChatGPT Deep Research** | Deepest synthesis, longest reports — factually solid | Reads dry — strong on facts, light on the human angle; gated behind paid plans |
-| **Gemini Deep Research** | Widest source coverage (100+ pages); reads like a scholarly literature review | Dense, university-research voice — takes patience to get through |
-| **Claude Deep Research** (claude.ai) | Distinct angles — frequently surfaces what the other two miss | Slow: 30–40 minutes per query, easy to lose patience waiting |
+| **ChatGPT Deep Research** | Deepest synthesis — factually solid | Reads dry — strong on facts, light on the human angle; gated behind paid plans |
+| **Gemini Deep Research** | Most citations (~60–100) and longest reports (20–30 pages); reads like a scholarly literature review | Dense, university-research voice — takes patience to get through |
+| **Claude Deep Research** (claude.ai) | Distinct angles — frequently surfaces what the other two miss | Slow: 40–50 minutes per query, easy to lose patience waiting |
 | **Perplexity Sonar Deep Research** | The most *readable* brief — fast (2–4 min), inline citations on every claim | Less synthesis-rich than the big three; not built for original analysis |
 
 **The honest take.** The highest-quality output comes from running the big three on the same question and synthesizing the answers via a Venn-diagram pass — convergence + unique insights + outliers. I wrote a [Multi-AI Research Synthesis prompt](https://github.com/dzivkovi/AI-assisted-SDLC-Project-scaffolding/blob/main/prompts/Multi-AI_Research_synthesis_prompt.md) for exactly that workflow. But that's the obsessive route — three subscriptions, an hour of waiting, and a synthesis pass.
